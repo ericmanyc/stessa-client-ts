@@ -11,10 +11,17 @@ change without notice.
   loan balance, equity, acquisition price). List with \`list_portfolios\`.
 - **Property**: a rental. Has address, type, beds/baths/sqft, market value,
   loan balance, equity, and a \`portfolio_id\`. List with \`list_properties\`.
-- **Transaction**: an income/expense line, with an amount, date, category, and a
-  bank \`account_id\`. Money is \`{ cents, currency_iso }\`. Use
-  \`get_transactions_summary\` for rollups and \`get_report_data\` for tabular
-  listings; \`list_transaction_categories\` for the category list.
+- **Transaction**: an income/expense line, with an amount, date, category
+  (\`transaction_category_id\`), and \`property_id\`. Money is
+  \`{ cents, currency_iso }\`. List with \`list_transactions\` (each row's \`id\`
+  is what the write tools take); rollups via \`get_transactions_summary\`;
+  category list via \`list_transaction_categories\`.
+  - **Recategorize**: \`recategorize_transaction(transactionId, categoryId)\`.
+  - **Reassign to a property**: \`assign_transaction_to_property(transactionId, propertyId)\`.
+  - **Create / delete**: \`create_transaction\`, \`delete_transactions\` (delete is
+    soft - moves to Trash, which Stessa auto-purges after 30 days).
+  These edit real financial records: confirm the target ids with the user
+  (\`list_transactions\`, \`list_transaction_categories\`, \`list_properties\`) first.
 - **Bank account**: linked/Unit accounts with balances. List with
   \`list_bank_accounts\`.
 - **Document**: uploaded files tagged to a property/unit/portfolio. List with

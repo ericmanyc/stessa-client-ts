@@ -15,7 +15,7 @@ const money = (dollars: number) => ({ cents: dollars * 100, currency_iso: "USD" 
 
 /** Routes fetch calls by URL substring to canned Stessa responses. */
 function fakeStessa(): typeof fetch {
-  return (async (input: string | URL | Request) => {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/v2/sidebar/app")) {
       return jsonResponse({ data: { user: { id: 500, email: "pat@example.com", first_name: "Pat" } } });
@@ -52,6 +52,40 @@ function fakeStessa(): typeof fetch {
         data: [
           { id: 5, type: "account", attributes: { balance: money(45678), mask: "1234", account_type: "checking" } },
         ],
+      });
+    }
+    // PUT /api/transactions/{id} (web3 update: recategorize / reassign)
+    const put = /\/api\/transactions\/(\d+)$/.exec(url);
+    if (put && (init?.method ?? "GET") === "PUT") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { transaction?: Record<string, unknown> };
+      const t = body.transaction ?? {};
+      return jsonResponse({
+        id: Number(put[1]),
+        name: "Rent",
+        amount: money(-1),
+        transaction_date: "2026-06-13",
+        transaction_category_id: t["transaction_category_id"] ?? 100,
+        property_id: t["property_id"] ?? 10,
+        transaction_category: { category: "Mortgages & Loans", sub_category: "Mortgage Payment" },
+        property: { id: 10, name: "Evergreen Terrace" },
+      });
+    }
+    // GET /api/v2/transactions (web3 list: { transactions: [...] })
+    if (url.includes("/api/v2/transactions") && !url.includes("transactions_summary")) {
+      return jsonResponse({
+        transactions: [
+          {
+            id: 7001,
+            name: "ZZ rent",
+            amount: money(1200),
+            transaction_date: "2026-06-01",
+            transaction_category_id: 100,
+            property_id: 10,
+            property: { id: 10, name: "Evergreen Terrace" },
+          },
+        ],
+        total_pages: 1,
+        total_count: 1,
       });
     }
     return jsonResponse({ data: [] });
@@ -93,7 +127,11 @@ describe("stessa-mcp server", () => {
       "list_tenancies",
       "get_transactions_summary",
       "list_transaction_categories",
-      "get_report_data",
+      "list_transactions",
+      "recategorize_transaction",
+      "assign_transaction_to_property",
+      "create_transaction",
+      "delete_transactions",
       "stessa_request",
     ]) {
       expect(names).toContain(expected);
@@ -134,6 +172,50 @@ describe("stessa-mcp server", () => {
     };
     expect(payload.data[0]!.balance.amount).toBe(45678);
     expect(payload.data[0]!.mask).toBe("1234");
+  });
+
+  it("list_transactions flattens the web3 { transactions: [...] } envelope and resolves the property", async () => {
+    const client = await connectedClient();
+    const result = await client.callTool({ name: "list_transactions", arguments: {} });
+    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
+      count: number;
+      data: Array<{ id: number; amount: { amount: number }; propertyId: number }>;
+      references: Record<string, Record<string, string>>;
+    };
+    expect(payload.count).toBe(1);
+    expect(payload.data[0]!.amount.amount).toBe(1200);
+    expect(payload.references["properties"]).toEqual({ "10": "742 Evergreen Terrace" });
+  });
+
+  it("recategorize_transaction PUTs the new category and returns the updated txn", async () => {
+    const client = await connectedClient();
+    const result = await client.callTool({
+      name: "recategorize_transaction",
+      arguments: { transactionId: 7001, categoryId: 150 },
+    });
+    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
+      updated: boolean;
+      transaction: { id: number; categoryId: number; categoryName: string };
+    };
+    expect(payload.updated).toBe(true);
+    expect(payload.transaction.id).toBe(7001);
+    expect(payload.transaction.categoryId).toBe(150);
+    expect(payload.transaction.categoryName).toBe("Mortgage Payment");
+  });
+
+  it("assign_transaction_to_property PUTs the new property", async () => {
+    const client = await connectedClient();
+    const result = await client.callTool({
+      name: "assign_transaction_to_property",
+      arguments: { transactionId: 7001, propertyId: 10 },
+    });
+    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
+      updated: boolean;
+      transaction: { propertyId: number; propertyName: string };
+    };
+    expect(payload.updated).toBe(true);
+    expect(payload.transaction.propertyId).toBe(10);
+    expect(payload.transaction.propertyName).toBe("Evergreen Terrace");
   });
 
   it("stessa_request reaches an arbitrary endpoint", async () => {

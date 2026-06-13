@@ -38,13 +38,22 @@ direct call sites (a resource may support more). "(?)" = method undetermined.
 - GET /api/v2/summary
 
 ## Transactions
-- POST /api/v2/transactions
+- GET /api/v2/transactions   (web3 list; response { transactions:[...], total_pages, total_count })
+- GET /api/v2/transactions/search?query=...
+- POST /api/v2/transactions   (create; JSON { transaction: { name, transaction_date, amount_cents, money_in, transaction_category_id?, property_id?, notes? } })
 - GET /api/v2/transaction_categories
-- GET /api/v2/transactions/almost_categorized
-- GET /api/v2/transactions/transaction_macro
 - GET /api/v2/transactions/transactions_summary
+- GET /api/v2/transactions/almost_categorized
 - PUT /api/v2/transactions/categorize_with_ml
 - PUT /api/v2/transactions/reject_ml_categorization
+
+### Transaction writes - legacy /api/transactions/* (web3, verified live 2026-06-12)
+These are NOT under /api/v2. Same origin (https://app.stessa.com).
+- PUT /api/transactions/{id}   recategorize / reassign / edit; JSON { transaction: { id, transaction_category_id?, property_id?, ... } } (partial OK). Used by recategorize_transaction + assign_transaction_to_property.
+- DELETE /api/transactions/{firstId}.json   bulk soft-delete to Trash; JSON { transaction: { transaction_ids: [...] } }. Auto-purges after 30 days; no immediate hard delete.
+- PATCH /api/transactions/update_multiple   bulk inline edit; FormData (transaction[transaction_category_id], transaction[property_id], transaction[transaction_ids][]).
+- PATCH /api/transactions/restore_multiple   restore from Trash; JSON { transaction_ids: [...] }.
+- POST /api/transactions/merge
 
 ## Tenants / Leases
 - DELETE, GET, POST, PUT /api/v2/tenancies

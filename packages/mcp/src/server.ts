@@ -273,27 +273,119 @@ export function createServer(client: StessaClient, options: ServerOptions = {}):
   );
 
   server.registerTool(
-    "get_report_data",
+    "list_transactions",
     {
       description:
-        "Get tabular report data - the source for broad transaction listings. Accepts scope and date filters.",
+        "List transactions (income/expense lines) with category, property, amount, and date. Use 'search' to match by description, 'deleted' to view Trash. Each item's id is what recategorize_transaction and assign_transaction_to_property take.",
       inputSchema: {
-        ...scopeParams,
-        dateGte: z.string().optional().describe("Start date filter (yyyy-MM-dd)"),
-        dateLte: z.string().optional().describe("End date filter (yyyy-MM-dd)"),
+        search: z.string().optional().describe("Match transactions by description text"),
+        deleted: z.boolean().optional().describe("Show trashed transactions instead of active ones"),
+        needsReview: z.boolean().optional().describe("Only transactions that need review"),
+        page: z.number().int().positive().optional().describe("Page number (default 1)"),
+        maxResults: maxResultsParam,
       },
     },
-    async ({ portfolioId, propertyId, unitId, dateGte, dateLte }) => {
+    async ({ search, deleted, needsReview, page, maxResults }) => {
       try {
-        const filters: Record<string, string> = {};
-        if (dateGte) filters["date_gte"] = dateGte;
-        if (dateLte) filters["date_lte"] = dateLte;
-        return toolSuccess(
-          await client.transactions.reportData({
-            scope: buildScope({ portfolioId, propertyId, unitId }),
-            filters,
-          }),
-        );
+        const data = await client.transactions.listAll(maxResults ?? 100, {
+          ...(page !== undefined ? { page } : {}),
+          ...(search !== undefined ? { searchQuery: search } : {}),
+          ...(deleted !== undefined ? { deleted } : {}),
+          ...(needsReview !== undefined ? { needsReview } : {}),
+        });
+        const result = await enrich({ data: data as unknown as Row[], count: data.length }, cache);
+        return toolSuccess(result);
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "recategorize_transaction",
+    {
+      description:
+        "Change a transaction's category. Pass the transaction id and the target category id (transaction_category_id from list_transaction_categories). Edits real financial records - confirm with the user first.",
+      inputSchema: {
+        transactionId: z.number().int().describe("Transaction id"),
+        categoryId: z.number().int().describe("Target transaction_category_id"),
+      },
+    },
+    async ({ transactionId, categoryId }) => {
+      try {
+        const updated = await client.transactions.recategorize(transactionId, categoryId);
+        return toolSuccess({ updated: true, transaction: updated });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "assign_transaction_to_property",
+    {
+      description:
+        "Assign (or move) a transaction to a property. Pass the transaction id and the target property id (from list_properties). Edits real financial records - confirm with the user first.",
+      inputSchema: {
+        transactionId: z.number().int().describe("Transaction id"),
+        propertyId: z.number().int().describe("Target property id"),
+      },
+    },
+    async ({ transactionId, propertyId }) => {
+      try {
+        const updated = await client.transactions.assignToProperty(transactionId, propertyId);
+        return toolSuccess({ updated: true, transaction: updated });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_transaction",
+    {
+      description:
+        "Create a manual transaction. amount is in dollars; use a negative amount (or moneyIn=false) for an expense. Optionally set category and property. Edits real financial records - confirm with the user first.",
+      inputSchema: {
+        name: z.string().describe("Description / payee"),
+        date: z.string().describe("Transaction date (yyyy-MM-dd)"),
+        amount: z.number().describe("Amount in dollars; negative = money out / expense"),
+        categoryId: z.number().int().optional().describe("transaction_category_id"),
+        propertyId: z.number().int().optional().describe("Property id"),
+        notes: z.string().optional().describe("Notes"),
+      },
+    },
+    async ({ name, date, amount, categoryId, propertyId, notes }) => {
+      try {
+        const created = await client.transactions.create({
+          name,
+          transactionDate: date,
+          amountCents: Math.round(amount * 100),
+          moneyIn: amount > 0,
+          transactionCategoryId: categoryId ?? null,
+          propertyId: propertyId ?? null,
+          notes: notes ?? null,
+        });
+        return toolSuccess({ created: true, transaction: created });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_transactions",
+    {
+      description:
+        "Move one or more transactions to Trash (soft delete; Stessa auto-purges Trash after 30 days, there is no immediate hard delete). Pass the transaction ids. Edits real financial records - confirm with the user first.",
+      inputSchema: {
+        transactionIds: z.array(z.number().int()).min(1).describe("Transaction ids to delete"),
+      },
+    },
+    async ({ transactionIds }) => {
+      try {
+        await client.transactions.delete(transactionIds);
+        return toolSuccess({ deleted: true, ids: transactionIds, note: "Moved to Trash (auto-purges after 30 days)." });
       } catch (error) {
         return toolError(error);
       }

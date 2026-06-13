@@ -100,25 +100,43 @@ export interface StessaTransaction {
   name: string | null;
   date: Date | null;
   amount: Money | null;
+  /** Category id; on web3 this is `transaction_category_id`. */
   categoryId: number | null;
+  categoryName: string | null;
   accountId: number | null;
   portfolioId: number | null;
   propertyId: number | null;
+  propertyName: string | null;
   unitId: number | null;
   notes: string | null;
   raw: Record<string, unknown>;
 }
 
+function nestedName(value: unknown, ...keys: string[]): string | null {
+  if (value && typeof value === "object") {
+    for (const k of keys) {
+      const v = (value as Record<string, unknown>)[k];
+      if (typeof v === "string" && v) {
+        return v;
+      }
+    }
+  }
+  return null;
+}
+
 export function parseTransaction(raw: Record<string, unknown>): StessaTransaction {
+  const cat = pick(raw, "transaction_category", "category");
   return {
     id: toNumber(pick(raw, "id") ?? 0),
     name: toStringOrNull(pick(raw, "name", "description", "merchant_name")),
-    date: parseStessaDateOrNull(pick(raw, "date", "posted_at", "transaction_date")),
+    date: parseStessaDateOrNull(pick(raw, "transaction_date", "date", "posted_at")),
     amount: parseMoney(pick(raw, "amount")),
-    categoryId: toNumberOrNull(pick(raw, "category_id", "categoryId")),
+    categoryId: toNumberOrNull(pick(raw, "transaction_category_id", "category_id", "categoryId")),
+    categoryName: nestedName(cat, "sub_category", "category", "name"),
     accountId: toNumberOrNull(pick(raw, "account_id", "accountId")),
     portfolioId: toNumberOrNull(pick(raw, "portfolio_id")),
     propertyId: toNumberOrNull(pick(raw, "property_id")),
+    propertyName: nestedName(pick(raw, "property"), "name", "title"),
     unitId: toNumberOrNull(pick(raw, "unit_id")),
     notes: toStringOrNull(pick(raw, "notes")),
     raw,
