@@ -74,6 +74,19 @@ export function parseMoney(value: unknown): Money | null {
   return null;
 }
 
+/**
+ * Build Money from a bare integer cents value (e.g. `rent_amount_cents`,
+ * `current_balance_cents`). Unlike `parseMoney`, which treats a bare number as
+ * dollars, this treats the number as cents.
+ */
+export function moneyFromCents(value: unknown): Money | null {
+  const cents = toNumberOrNull(value);
+  if (cents === null) {
+    return null;
+  }
+  return { cents, amount: cents / 100, currency: "USD" };
+}
+
 const ISO_DATE = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/;
 
 /** Parses Stessa date strings: `yyyy-MM-dd` (local) or full ISO 8601 datetimes. */

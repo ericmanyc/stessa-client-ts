@@ -8,6 +8,7 @@
  * currency_iso }` and are flattened to `Money` via `parseMoney`.
  */
 import {
+  moneyFromCents,
   parseMoney,
   parseStessaDateOrNull,
   pick,
@@ -103,11 +104,22 @@ export interface StessaTransaction {
   /** Category id; on web3 this is `transaction_category_id`. */
   categoryId: number | null;
   categoryName: string | null;
+  /** The linked bank account; comes back nested as `external_account`. */
   accountId: number | null;
+  accountName: string | null;
   portfolioId: number | null;
   propertyId: number | null;
   propertyName: string | null;
   unitId: number | null;
+  tenancyId: number | null;
+  scheduledIncomeId: number | null;
+  /** How it was categorized (e.g. "rule", "manual"). */
+  categorizationMethod: string | null;
+  categorizedAt: Date | null;
+  attachmentsCount: number | null;
+  ownerName: string | null;
+  pending: boolean;
+  deletedAt: Date | null;
   notes: string | null;
   raw: Record<string, unknown>;
 }
@@ -124,8 +136,25 @@ function nestedName(value: unknown, ...keys: string[]): string | null {
   return null;
 }
 
+function nestedNumber(value: unknown, ...keys: string[]): number | null {
+  if (value && typeof value === "object") {
+    for (const k of keys) {
+      const n = toNumberOrNull((value as Record<string, unknown>)[k]);
+      if (n !== null) {
+        return n;
+      }
+    }
+  }
+  return null;
+}
+
 export function parseTransaction(raw: Record<string, unknown>): StessaTransaction {
   const cat = pick(raw, "transaction_category", "category");
+  const account = pick(raw, "external_account");
+  const externalSite =
+    account && typeof account === "object"
+      ? (account as Record<string, unknown>)["external_site"]
+      : null;
   return {
     id: toNumber(pick(raw, "id") ?? 0),
     name: toStringOrNull(pick(raw, "name", "description", "merchant_name")),
@@ -133,11 +162,20 @@ export function parseTransaction(raw: Record<string, unknown>): StessaTransactio
     amount: parseMoney(pick(raw, "amount")),
     categoryId: toNumberOrNull(pick(raw, "transaction_category_id", "category_id", "categoryId")),
     categoryName: nestedName(cat, "sub_category", "category", "name"),
-    accountId: toNumberOrNull(pick(raw, "account_id", "accountId")),
+    accountId: toNumberOrNull(pick(raw, "account_id", "accountId")) ?? nestedNumber(account, "id"),
+    accountName: nestedName(account, "name") ?? nestedName(externalSite, "name"),
     portfolioId: toNumberOrNull(pick(raw, "portfolio_id")),
     propertyId: toNumberOrNull(pick(raw, "property_id")),
     propertyName: nestedName(pick(raw, "property"), "name", "title"),
     unitId: toNumberOrNull(pick(raw, "unit_id")),
+    tenancyId: toNumberOrNull(pick(raw, "tenancy_id")),
+    scheduledIncomeId: toNumberOrNull(pick(raw, "scheduled_income_id")),
+    categorizationMethod: toStringOrNull(pick(raw, "categorization_method")),
+    categorizedAt: parseStessaDateOrNull(pick(raw, "categorized_at")),
+    attachmentsCount: toNumberOrNull(pick(raw, "attachments_count")),
+    ownerName: toStringOrNull(pick(raw, "owner_name")),
+    pending: toBoolean(pick(raw, "pending")),
+    deletedAt: parseStessaDateOrNull(pick(raw, "deleted_at")),
     notes: toStringOrNull(pick(raw, "notes")),
     raw,
   };
@@ -196,22 +234,65 @@ export function parseDocument(raw: Record<string, unknown>): StessaDocument {
   };
 }
 
+export interface StessaTenant {
+  id: number | null;
+  name: string | null;
+  primary: boolean;
+}
+
 export interface StessaTenancy {
   id: number;
   propertyId: number | null;
   unitId: number | null;
-  externalAccountId: number | null;
-  rentCollectionEnabled: boolean;
+  scheduledIncomeId: number | null;
+  /** Lease lifecycle: active, expires_soon, expired, future. */
+  status: string | null;
+  /** Rent balance state: overdue, current, paid. */
+  balanceStatus: string | null;
+  rentAmount: Money | null;
+  currentBalance: Money | null;
+  lastMonthBalance: Money | null;
+  leaseStartDate: Date | null;
+  leaseEndDate: Date | null;
+  moveIn: Date | null;
+  moveOut: Date | null;
+  monthToMonth: boolean;
+  draft: boolean;
+  /** Whether Stessa Rent Pay (online rent collection) is enabled. */
+  stessaRentPay: boolean;
+  tenants: StessaTenant[];
   raw: Record<string, unknown>;
 }
 
+function parseTenant(raw: unknown): StessaTenant {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: toNumberOrNull(pick(r, "id")),
+    name: toStringOrNull(pick(r, "name")),
+    primary: toBoolean(pick(r, "primary")),
+  };
+}
+
 export function parseTenancy(raw: Record<string, unknown>): StessaTenancy {
+  const tenants = pick(raw, "tenants");
   return {
     id: toNumber(pick(raw, "id", "tenancy_id") ?? 0),
     propertyId: toNumberOrNull(pick(raw, "property_id")),
     unitId: toNumberOrNull(pick(raw, "unit_id")),
-    externalAccountId: toNumberOrNull(pick(raw, "external_account_id")),
-    rentCollectionEnabled: toBoolean(pick(raw, "rent_collection_enabled", "rent_collection")),
+    scheduledIncomeId: toNumberOrNull(pick(raw, "scheduled_income_id")),
+    status: toStringOrNull(pick(raw, "status")),
+    balanceStatus: toStringOrNull(pick(raw, "balance_status")),
+    rentAmount: moneyFromCents(pick(raw, "rent_amount_cents")),
+    currentBalance: moneyFromCents(pick(raw, "current_balance_cents")),
+    lastMonthBalance: moneyFromCents(pick(raw, "last_month_balance_cents")),
+    leaseStartDate: parseStessaDateOrNull(pick(raw, "lease_start_date")),
+    leaseEndDate: parseStessaDateOrNull(pick(raw, "lease_end_date")),
+    moveIn: parseStessaDateOrNull(pick(raw, "move_in")),
+    moveOut: parseStessaDateOrNull(pick(raw, "move_out")),
+    monthToMonth: toBoolean(pick(raw, "month_to_month")),
+    draft: toBoolean(pick(raw, "draft")),
+    stessaRentPay: toBoolean(pick(raw, "stessa_rent_pay")),
+    tenants: Array.isArray(tenants) ? tenants.map(parseTenant) : [],
     raw,
   };
 }

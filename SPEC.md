@@ -50,7 +50,8 @@ Full report in `docs/api-findings.md`; raw endpoint list in `docs/endpoints.txt`
 - [x] client: typed sub-clients + generic `resource()` + token stores + CDP auth
 - [x] mcp: 13 tools + `stessa_request` + `stessa://guide`/`stessa://catalog`; CLI; hosted server
 - [x] tests green (35); build green; `serve` boots and answers `/healthz` + OAuth metadata + admin invite
-- [ ] **NOT yet verified live** (no test account): exact `token_from_session` response shape; the Stessa session cookie name; per-endpoint field names; whether `/api/v2` accepts the bearer without the cookie. The `stessa_request` escape hatch + `stessa://catalog` cover the gap until verified.
+- [x] **Field names corrected from the real `stessa` skill (hand-derived from live usage)**: rewrote the Tenancy model (status active/expires_soon/expired/future, balance_status overdue/current/paid, `*_cents` rent/balances via `moneyFromCents`, lease/move dates, month_to_month, draft, stessa_rent_pay, tenants[]); enriched Transaction (nested `external_account`, `tenancy_id`, `scheduled_income_id`, categorization_method/categorized_at, attachments_count, owner_name, pending, deleted_at); guide gained the categorize-by-prior-match workflow + per-user needs_review note.
+- [ ] **NOT yet verified live** (no test account): exact `token_from_session` response shape; the Stessa session cookie name; whether `/api/v2` accepts the bearer without the cookie; the remaining write shapes (create/delete/categories endpoint - skill uses `GET /api/transaction_categories?by_direction=true`, client uses `/api/v2`). The `stessa_request` escape hatch + `stessa://catalog` cover the gap until verified.
 - [ ] writes beyond `stessa_request` (typed create/update for transactions, tenancies); banking flows
 - [ ] npm publish (later)
 

@@ -6,6 +6,7 @@ export {
 } from "./auth.js";
 export { StessaClientError } from "./errors.js";
 export {
+  moneyFromCents,
   parseMoney,
   parseStessaDate,
   parseStessaDateOrNull,
@@ -28,6 +29,7 @@ export {
   type StessaPortfolio,
   type StessaProperty,
   type StessaTenancy,
+  type StessaTenant,
   type StessaTransaction,
 } from "./models.js";
 export {
