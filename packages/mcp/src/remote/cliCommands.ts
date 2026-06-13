@@ -28,7 +28,8 @@ export async function pairWithRemote(remoteUrl: string, email: string, code: str
   }
 
   console.log("Opening a browser window - sign in to Stessa with your own account...");
-  const provider = new CdpTokenProvider({ allowInteractiveLogin: true });
+  console.log("After you finish signing in, this will capture the session automatically (a few seconds).");
+  const provider = new CdpTokenProvider({ allowInteractiveLogin: true, debug: true });
   try {
     const tokens = await provider.interactiveLogin();
     if (!tokens) {

@@ -22,6 +22,8 @@ export interface CdpTokenProviderOptions {
   browserExecutablePath?: string;
   /** Timeout for the whole interactive login flow, in milliseconds. Default 5 minutes. */
   interactiveLoginTimeoutMs?: number;
+  /** Log progress to stderr (also enabled by STESSA_DEBUG=1). */
+  debug?: boolean;
 }
 
 interface CdpTarget {
@@ -46,7 +48,7 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
   private readonly options: Required<
     Pick<
       CdpTokenProviderOptions,
-      "debugPort" | "allowInteractiveLogin" | "appUrl" | "interactiveLoginTimeoutMs"
+      "debugPort" | "allowInteractiveLogin" | "appUrl" | "interactiveLoginTimeoutMs" | "debug"
     >
   > &
     CdpTokenProviderOptions;
@@ -61,8 +63,15 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
       allowInteractiveLogin: false,
       appUrl: "https://app.stessa.com",
       interactiveLoginTimeoutMs: 5 * 60_000,
+      debug: process.env["STESSA_DEBUG"] === "1",
       ...options,
     };
+  }
+
+  private log(message: string): void {
+    if (this.options.debug) {
+      console.error(`[stessa-login] ${message}`);
+    }
   }
 
   getToken(signal?: AbortSignal): Promise<string | null> {
@@ -216,30 +225,69 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
   ): Promise<StessaTokenSet | null> {
     const client = await CDP({ port, target: target.id });
     try {
+      const url = (await this.evaluateString(client, "window.location.href")) ?? "";
+      const onApp = this.isAppOrigin(url);
       const sessionCookie = await this.extractCookieHeader(client);
+      this.log(
+        `extract: url=${url.slice(0, 64)} onApp=${onApp} cookie=${sessionCookie ? `${sessionCookie.length}b` : "none"}`,
+      );
       if (!sessionCookie) {
         return null;
       }
 
-      // Prefer minting the bearer from inside the page (matches the app exactly);
-      // fall back to a server-side exchange with the captured cookie.
-      const inPage = await this.evaluateString(
-        client,
-        "fetch('/api/token_from_session',{credentials:'include'}).then(r=>r.text())",
-        true,
-      );
-      const accessToken =
-        normalizeBearer(inPage) ??
-        (await exchangeSessionForToken({ accessToken: "", sessionCookie }, this.options.appUrl, signal))
-          ?.accessToken ??
-        null;
+      let accessToken: string | null = null;
+
+      // 1. Read the live bearer straight from the Vue store (Stessa is Vue 2;
+      //    the root element exposes __vue__.$store.getters.getAuthorizationToken).
+      if (onApp) {
+        const fromStore = await this.evaluateString(
+          client,
+          "(function(){try{var e=document.querySelector('#app');var s=e&&e.__vue__&&e.__vue__.$store;var t=s&&s.getters&&s.getters.getAuthorizationToken;return typeof t==='string'?t:null;}catch(_){return null;}})()",
+        );
+        accessToken = normalizeBearer(fromStore);
+        if (accessToken) this.log("extract: bearer from Vue store");
+      }
+
+      // 2. Same-origin session->token exchange from inside the page.
+      if (!accessToken && onApp) {
+        const inPage = await this.evaluateString(
+          client,
+          "fetch('/api/token_from_session',{credentials:'include',headers:{Accept:'application/json, text/plain, */*'}}).then(function(r){return r.text()}).catch(function(){return null})",
+          true,
+        );
+        accessToken = normalizeBearer(inPage);
+        this.log(
+          `extract: token_from_session(in-page) -> ${accessToken ? "bearer" : `none (${inPage ? inPage.slice(0, 80) : "null"})`}`,
+        );
+      }
+
+      // 3. Server-side exchange with the captured cookie (origin-independent).
+      if (!accessToken) {
+        const set = await exchangeSessionForToken(
+          { accessToken: "", sessionCookie },
+          this.options.appUrl,
+          signal,
+        );
+        accessToken = set?.accessToken ?? null;
+        this.log(`extract: token_from_session(server) -> ${accessToken ? "bearer" : "none"}`);
+      }
 
       if (!accessToken) {
         return null;
       }
+      this.log("extract: captured Stessa session");
       return { accessToken, sessionCookie };
     } finally {
       await client.close().catch(() => {});
+    }
+  }
+
+  private isAppOrigin(url: string): boolean {
+    try {
+      const host = new URL(url).host.toLowerCase();
+      return host.endsWith(new URL(this.options.appUrl).host.toLowerCase());
+    } catch {
+      return false;
     }
   }
 
@@ -372,25 +420,9 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
     if (!target) {
       return null;
     }
-
-    const client = await CDP({ port, target: target.id });
-    let currentUrl: string | null;
-    try {
-      currentUrl = await this.evaluateString(client, "window.location.href");
-    } finally {
-      await client.close().catch(() => {});
-    }
-
-    if (!currentUrl) {
-      return null;
-    }
-
-    // Still on a login / Auth0 / sign-in page; keep waiting.
-    const lower = currentUrl.toLowerCase();
-    if (lower.includes("/login") || lower.includes("/signin") || lower.includes("auth0")) {
-      return null;
-    }
-
+    // Attempt extraction every cycle. It only yields a token once the user is
+    // actually signed in (a Stessa session cookie exists and mints a bearer), so
+    // success is the completion signal - no fragile URL matching needed.
     return this.extractTokensViaCdp(port, target, signal);
   }
 
