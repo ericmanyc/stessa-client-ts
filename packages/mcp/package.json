@@ -1,0 +1,48 @@
+{
+  "name": "stessa-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Stessa data to AI agents (Claude Desktop, Claude Code, Cursor). Unofficial.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Eric Ma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericmanyc/stessa-client-ts.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/ericmanyc/stessa-client-ts#readme",
+  "bugs": "https://github.com/ericmanyc/stessa-client-ts/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "stessa",
+    "claude",
+    "ai-agent",
+    "property-management"
+  ],
+  "bin": {
+    "stessa-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "express": "^5.2.1",
+    "pg": "^8.21.0",
+    "stessa-client": "^0.1.0",
+    "zod": "^3.25.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.20.0"
+  }
+}

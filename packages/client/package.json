@@ -1,0 +1,48 @@
+{
+  "name": "stessa-client",
+  "version": "0.1.0",
+  "description": "Unofficial TypeScript client for Stessa (rental property accounting). Works against internal endpoints; not an official Stessa product.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Eric Ma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericmanyc/stessa-client-ts.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/ericmanyc/stessa-client-ts#readme",
+  "bugs": "https://github.com/ericmanyc/stessa-client-ts/issues",
+  "keywords": [
+    "stessa",
+    "property-management",
+    "rental",
+    "landlord",
+    "real-estate",
+    "accounting",
+    "api-client"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./cdp": "./dist/cdp/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^1.1.0",
+    "chrome-remote-interface": "^0.33.0"
+  },
+  "devDependencies": {
+    "@types/chrome-remote-interface": "^0.31.14"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
