@@ -34,3 +34,20 @@ export function isExpiredOrExpiring(token: string | null | undefined): boolean {
   }
   return expiry.getTime() < Date.now() + 60_000;
 }
+
+/**
+ * Whether a token is good to use right now. Stessa's API token (from
+ * token_from_session) is **opaque** - it carries no expiry we can read - and the
+ * durable credential is the session cookie, so an opaque token is treated as
+ * usable and refreshed reactively on a 401. JWTs still use their `exp` claim.
+ */
+export function isUsableToken(token: string | null | undefined): boolean {
+  if (!token) {
+    return false;
+  }
+  const expiry = getJwtExpiry(token);
+  if (expiry === null) {
+    return true; // opaque token: assume usable; a 401 triggers a re-mint
+  }
+  return expiry.getTime() >= Date.now() + 60_000;
+}

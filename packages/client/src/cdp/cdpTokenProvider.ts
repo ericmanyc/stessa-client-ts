@@ -6,8 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import CDP from "chrome-remote-interface";
 import type { StessaAuthTokenProvider, StessaTokenSet, StessaTokenStore } from "../auth.js";
 import { findChromiumBrowsers } from "./chromiumFinder.js";
-import { isExpiredOrExpiring } from "./jwt.js";
-import { exchangeSessionForToken } from "./refresher.js";
+import { isUsableToken } from "./jwt.js";
+import { exchangeSessionForToken, extractToken } from "./refresher.js";
 
 export interface CdpTokenProviderOptions {
   /** CDP debug port to connect to an existing browser. Default 9222. */
@@ -120,7 +120,7 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
   }
 
   private async getTokenCore(signal?: AbortSignal): Promise<string | null> {
-    if (this.cached && !isExpiredOrExpiring(this.cached.accessToken)) {
+    if (this.cached && isUsableToken(this.cached.accessToken)) {
       return this.cached.accessToken;
     }
 
@@ -160,7 +160,7 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
       if (!stored) {
         return null;
       }
-      if (!isExpiredOrExpiring(stored.accessToken)) {
+      if (isUsableToken(stored.accessToken)) {
         return stored;
       }
       const refreshed = await exchangeSessionForToken(stored, this.options.appUrl, signal);
@@ -244,7 +244,7 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
           client,
           "(function(){try{var e=document.querySelector('#app');var s=e&&e.__vue__&&e.__vue__.$store;var t=s&&s.getters&&s.getters.getAuthorizationToken;return typeof t==='string'?t:null;}catch(_){return null;}})()",
         );
-        accessToken = normalizeBearer(fromStore);
+        accessToken = fromStore ? extractToken(fromStore) : null;
         if (accessToken) this.log("extract: bearer from Vue store");
       }
 
@@ -255,7 +255,7 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
           "fetch('/api/token_from_session',{credentials:'include',headers:{Accept:'application/json, text/plain, */*'}}).then(function(r){return r.text()}).catch(function(){return null})",
           true,
         );
-        accessToken = normalizeBearer(inPage);
+        accessToken = inPage ? extractToken(inPage) : null;
         this.log(
           `extract: token_from_session(in-page) -> ${accessToken ? "bearer" : `none (${inPage ? inPage.slice(0, 80) : "null"})`}`,
         );
@@ -448,24 +448,5 @@ export class CdpTokenProvider implements StessaAuthTokenProvider {
 
   dispose(): void {
     this.killBrowserProcess();
-  }
-}
-
-/** Accept either a bare JWT or a JSON wrapper from token_from_session. */
-function normalizeBearer(text: string | null): string | null {
-  if (!text) {
-    return null;
-  }
-  const trimmed = text.trim();
-  if (/^[\w-]+\.[\w-]+\.[\w-]+$/.test(trimmed)) {
-    return trimmed;
-  }
-  try {
-    const body = JSON.parse(trimmed) as Record<string, unknown>;
-    const candidate =
-      body["token"] ?? body["access_token"] ?? body["accessToken"];
-    return typeof candidate === "string" && candidate ? candidate : null;
-  } catch {
-    return null;
   }
 }

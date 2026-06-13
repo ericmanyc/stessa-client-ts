@@ -1,5 +1,5 @@
 import type { StessaAuthTokenProvider, StessaTokenSet } from "stessa-client";
-import { exchangeSessionForToken, isExpiredOrExpiring } from "stessa-client/cdp";
+import { exchangeSessionForToken, isUsableToken } from "stessa-client/cdp";
 import { open, seal } from "./crypto.js";
 import type { RemoteStore } from "./store.js";
 
@@ -41,7 +41,7 @@ export class VaultTokenProvider implements StessaAuthTokenProvider {
 
   getToken(signal?: AbortSignal): Promise<string | null> {
     return serialized(this.userId, async () => {
-      if (this.cached && !isExpiredOrExpiring(this.cached.accessToken)) {
+      if (this.cached && isUsableToken(this.cached.accessToken)) {
         return this.cached.accessToken;
       }
 
@@ -50,7 +50,7 @@ export class VaultTokenProvider implements StessaAuthTokenProvider {
         return null;
       }
 
-      if (stored.accessToken && !isExpiredOrExpiring(stored.accessToken)) {
+      if (isUsableToken(stored.accessToken)) {
         this.cached = stored;
         return stored.accessToken;
       }

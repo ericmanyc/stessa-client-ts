@@ -3,11 +3,12 @@ import type { StessaTokenSet } from "../auth.js";
 /**
  * Mints a fresh Stessa bearer from a session cookie via
  * `GET /api/token_from_session`. This is the app's own session->token exchange:
- * a valid Stessa session cookie returns a short-lived Auth0 access token.
+ * a valid Stessa session cookie returns an API token sent as `Bearer <token>`.
  *
- * The response shape was not verified live; this accepts a bare token string or
- * common JSON wrappers (`{ token }`, `{ access_token }`, `{ data: { token } }`).
- * Returns the new token set (cookie carried over), or null on any failure.
+ * Verified live (web3 app): the response is
+ * `{ data: { auth_token: "<opaque>", user: {...} } }`. The token is opaque (not
+ * a JWT). This also tolerates a few alternate shapes. Returns the new token set
+ * (cookie carried over), or null on any failure.
  */
 export async function exchangeSessionForToken(
   current: StessaTokenSet,
@@ -45,23 +46,31 @@ export async function exchangeSessionForToken(
   }
 }
 
-function extractToken(text: string): string | null {
+/**
+ * Pull the API token out of a token_from_session response. Confirmed shape is
+ * `{ data: { auth_token } }`; also accepts a bare token line and a few common
+ * wrappers. The token may be opaque (no JWT structure).
+ */
+export function extractToken(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed) {
     return null;
   }
-  // A bare JWT (three dot-separated segments) returned as text/plain.
-  if (/^[\w-]+\.[\w-]+\.[\w-]+$/.test(trimmed)) {
+  if (trimmed[0] !== "{" && trimmed[0] !== "[") {
+    // A bare token returned as text/plain.
     return trimmed;
   }
   try {
     const body = JSON.parse(trimmed) as Record<string, unknown>;
+    const data = (body["data"] as Record<string, unknown> | undefined) ?? {};
     const candidate =
+      data["auth_token"] ??
+      body["auth_token"] ??
       body["token"] ??
       body["access_token"] ??
       body["accessToken"] ??
-      (body["data"] as Record<string, unknown> | undefined)?.["token"] ??
-      (body["data"] as Record<string, unknown> | undefined)?.["access_token"];
+      data["token"] ??
+      data["access_token"];
     return typeof candidate === "string" && candidate ? candidate : null;
   } catch {
     return null;
