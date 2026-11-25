@@ -37,13 +37,54 @@ export async function exchangeSessionForToken(
     if (!accessToken) {
       return null;
     }
-    return { accessToken, sessionCookie: current.sessionCookie };
+    // If Stessa rotates or extends the session (Set-Cookie), keep the new
+    // values; otherwise the stored cookie silently ages out.
+    const sessionCookie = mergeSetCookies(current.sessionCookie, response.headers.getSetCookie());
+    return { accessToken, sessionCookie };
   } catch (error) {
     if (signal?.aborted) {
       throw error;
     }
     return null;
   }
+}
+
+/**
+ * Apply Set-Cookie response headers to a `Cookie` request header value:
+ * updated names are replaced, new names appended, and cookies the server
+ * deletes (empty value, Max-Age<=0, or an Expires in the past) are dropped.
+ */
+export function mergeSetCookies(cookieHeader: string, setCookies: readonly string[]): string {
+  const jar = new Map<string, string>();
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) {
+      jar.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim());
+    }
+  }
+  for (const header of setCookies) {
+    const [pair = "", ...attrs] = header.split(";");
+    const eq = pair.indexOf("=");
+    if (eq <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    const deleted =
+      value === "" ||
+      attrs.some((a) => {
+        const [k = "", v = ""] = a.split("=").map((x) => x.trim());
+        if (k.toLowerCase() === "max-age") return Number(v) <= 0;
+        if (k.toLowerCase() === "expires") return Date.parse(v) < Date.now();
+        return false;
+      });
+    if (deleted) {
+      jar.delete(name);
+    } else {
+      jar.set(name, value);
+    }
+  }
+  return [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
 /**

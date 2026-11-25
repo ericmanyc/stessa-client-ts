@@ -45,8 +45,11 @@ export class VaultTokenProvider implements StessaAuthTokenProvider {
         return this.cached.accessToken;
       }
 
-      const stored = this.cached ?? (await this.loadFromVault());
+      // The vault is the source of truth: another provider instance (another
+      // MCP session, or the keep-alive) may have refreshed since we cached.
+      const stored = await this.loadFromVault();
       if (!stored) {
+        this.cached = null;
         return null;
       }
 
@@ -55,14 +58,7 @@ export class VaultTokenProvider implements StessaAuthTokenProvider {
         return stored.accessToken;
       }
 
-      const refreshed = await exchangeSessionForToken(stored, APP_URL, signal);
-      if (!refreshed) {
-        this.cached = null;
-        return null;
-      }
-      await this.persist(refreshed);
-      this.cached = refreshed;
-      return refreshed.accessToken;
+      return (await this.mint(stored, signal))?.accessToken ?? null;
     });
   }
 
@@ -71,14 +67,38 @@ export class VaultTokenProvider implements StessaAuthTokenProvider {
       if (this.cached?.accessToken !== rejectedToken) {
         return;
       }
-      const refreshed = await exchangeSessionForToken(this.cached, APP_URL, signal);
-      if (refreshed) {
-        await this.persist(refreshed);
-        this.cached = refreshed;
-      } else {
-        this.cached = null;
+      const stored = await this.loadFromVault();
+      if (stored && stored.accessToken !== rejectedToken) {
+        this.cached = stored; // someone else already re-minted
+        return;
       }
+      await this.mint(stored, signal);
     });
+  }
+
+  /**
+   * Force a round trip to Stessa with the stored session cookie, even when the
+   * cached bearer looks usable. This is what actually keeps an idle session
+   * alive (an opaque bearer is otherwise served from the vault without ever
+   * touching Stessa). Returns whether the session is still valid.
+   */
+  keepAlive(signal?: AbortSignal): Promise<boolean> {
+    return serialized(this.userId, async () => {
+      const stored = await this.loadFromVault();
+      return (await this.mint(stored, signal)) !== null;
+    });
+  }
+
+  private async mint(
+    stored: StessaTokenSet | null,
+    signal?: AbortSignal,
+  ): Promise<StessaTokenSet | null> {
+    const refreshed = stored ? await exchangeSessionForToken(stored, APP_URL, signal) : null;
+    if (refreshed) {
+      await this.persist(refreshed);
+    }
+    this.cached = refreshed;
+    return refreshed;
   }
 
   private async loadFromVault(): Promise<StessaTokenSet | null> {

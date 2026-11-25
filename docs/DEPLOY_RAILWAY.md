@@ -85,8 +85,10 @@ Deletes their vault entry and rotates their invite code.
 - **Single instance only.** Per-user session mints are serialized in-process; do
   not scale to multiple replicas.
 - **Session lifetime is unverified.** Stessa bearers are short-lived and minted
-  from the session cookie via `GET /api/token_from_session`; a daily keep-alive
-  keeps each user's session warm. How long an idle Stessa session stays valid -
+  from the session cookie via `GET /api/token_from_session`. A keep-alive pings
+  Stessa with each user's session at boot and then every
+  `KEEPALIVE_INTERVAL_MINUTES` (default 60), saving any cookie Stessa rotates.
+  Check the logs for `keepalive: N/M sessions ok`. How long an idle Stessa session stays valid -
   and whether Stessa tolerates many sessions minting from one datacenter IP - has
   not been tested at scale. If a teammate's tools start returning "not signed
   in", they re-run the `login --remote` pairing step.

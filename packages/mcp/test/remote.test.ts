@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { open, parseVaultKey, randomInviteCode, seal, sha256hex } from "../src/remote/crypto.js";
 import { MemoryRemoteStore } from "../src/remote/store.js";
 import { VaultOAuthProvider } from "../src/remote/oauthProvider.js";
-import { sealTokenSet } from "../src/remote/vaultTokenProvider.js";
+import { VaultTokenProvider, sealTokenSet } from "../src/remote/vaultTokenProvider.js";
 
 const VAULT_KEY = parseVaultKey(randomBytes(32).toString("hex"));
 
@@ -101,5 +101,60 @@ describe("VaultOAuthProvider", () => {
       state: "",
     });
     expect(login.ok).toBe(false);
+  });
+});
+
+describe("VaultTokenProvider keep-alive", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function setup(fetchImpl: typeof fetch) {
+    vi.stubGlobal("fetch", fetchImpl);
+    const store = new MemoryRemoteStore();
+    await store.saveVault(
+      7,
+      sealTokenSet({ accessToken: "opaque-old", sessionCookie: "_stessa_session=s1" }, VAULT_KEY),
+    );
+    const load = async () => JSON.parse(open((await store.loadVault(7))!, VAULT_KEY));
+    return { store, load, make: () => new VaultTokenProvider(7, store, VAULT_KEY) };
+  }
+
+  it("keepAlive hits Stessa even when the stored opaque bearer looks usable, and saves rotated cookies", async () => {
+    let calls = 0;
+    const { make, load } = await setup((async () => {
+      calls++;
+      return new Response(JSON.stringify({ data: { auth_token: `opaque-${calls}` } }), {
+        headers: [["Set-Cookie", "_stessa_session=s2; Path=/; HttpOnly"]],
+      });
+    }) as typeof fetch);
+    const provider = make();
+    expect(await provider.getToken()).toBe("opaque-old"); // served from vault, no network
+    expect(calls).toBe(0);
+    expect(await provider.keepAlive()).toBe(true);
+    expect(calls).toBe(1);
+    expect(await load()).toEqual({ accessToken: "opaque-1", sessionCookie: "_stessa_session=s2" });
+  });
+
+  it("keepAlive reports a rejected session without deleting the vault", async () => {
+    const { make, store } = await setup((async () => new Response("", { status: 401 })) as typeof fetch);
+    expect(await make().keepAlive()).toBe(false);
+    expect(await store.loadVault(7)).not.toBeNull();
+  });
+
+  it("re-reads the vault instead of re-minting from a stale cached copy", async () => {
+    let calls = 0;
+    const { make, load } = await setup((async () => {
+      calls++;
+      return new Response(JSON.stringify({ data: { auth_token: `opaque-${calls}` } }));
+    }) as typeof fetch);
+    const a = make();
+    const b = make();
+    expect(await a.getToken()).toBe("opaque-old");
+    await b.keepAlive(); // vault now holds opaque-1
+    await a.onTokenRejected("opaque-old"); // a's cache is stale: adopt vault, no extra mint
+    expect(calls).toBe(1);
+    expect(await a.getToken()).toBe("opaque-1");
+    expect((await load()).accessToken).toBe("opaque-1");
   });
 });

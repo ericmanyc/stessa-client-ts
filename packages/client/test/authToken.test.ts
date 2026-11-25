@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractToken } from "../src/cdp/refresher.js";
+import { extractToken, mergeSetCookies } from "../src/cdp/refresher.js";
 import { isUsableToken } from "../src/cdp/jwt.js";
 
 describe("extractToken (token_from_session parsing)", () => {
@@ -41,5 +41,21 @@ describe("isUsableToken (opaque tokens have no readable expiry)", () => {
       "base64url",
     );
     expect(isUsableToken(`h.${future}.s`)).toBe(true);
+  });
+});
+
+describe("mergeSetCookies", () => {
+  it("replaces, appends and deletes cookies", () => {
+    expect(
+      mergeSetCookies("a=1; b=2; c=3", [
+        "a=9; Path=/; HttpOnly",
+        "d=4; Secure",
+        "b=; Max-Age=0",
+        "c=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+      ]),
+    ).toBe("a=9; d=4");
+  });
+  it("is a no-op without Set-Cookie", () => {
+    expect(mergeSetCookies("a=1; b=2", [])).toBe("a=1; b=2");
   });
 });
